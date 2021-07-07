@@ -209,11 +209,8 @@ class WSClient:
 
         # remove duplicates
         for match in matches:
-            found = False
-            for dedup in dedups:
-                if match.id == dedup.id:
-                    found = True
-            if found is False:
-                dedups.append(match)
+            if match.id in [d.id for d in dedups]:
+                continue
+            dedups.append(match)
 
         return dedups
