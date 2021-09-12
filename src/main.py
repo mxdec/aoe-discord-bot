@@ -15,7 +15,7 @@ from aoe import WSClient, Match, Player
 
 @dataclass
 class Config:
-    """Class representing the config file."""
+    """The config file."""
 
     aoe_ws: str
     discord_hook: str
@@ -24,7 +24,7 @@ class Config:
 
 @dataclass
 class Discord:
-    """Class representing the Discord client."""
+    """The Discord client."""
 
     url: str
 
@@ -52,9 +52,21 @@ class CurrentMatch:
     match: Match
     teams: List[Team]
 
+    def versus_str(self) -> str:
+        """Return list of players as string."""
+        s = ""
+        for i, team in enumerate(self.teams):
+            for ip, pl in enumerate(team.players):
+                s += pl.name
+                if ip < len(team.players) - 1:
+                    s += ", "
+            if i < len(self.teams) - 1:
+                s += " vs "
+        return s
+
 
 class Notifier:
-    """Class representing the notifier engine."""
+    """The notifier engine."""
 
     def __init__(
         self, cli: WSClient, dsc: Discord, pls: List[Player]
@@ -63,76 +75,37 @@ class Notifier:
         self.cli = cli
         self.discord = dsc
         self.players = pls
-        self.matches: List[CurrentMatch] = []
-        self.waitingscores: List[Match] = []
 
     async def run(self) -> None:
-        self.matches = await self.get_lastmatches(True)
-        if self.matches is None:
+        prev = await self.get_lastmatches()
+        if prev is None:
             logging.error("could't initialize matches")
             return
 
         logging.info("recent matches initialized")
-
         while True:
             time.sleep(50)
-            matches = await self.get_lastmatches(True)
-            if matches is None:
-                logging.error("could't get lash matches")
+            new = await self.get_lastmatches()
+            if new is None:
+                logging.error("couldn't get last matches")
                 continue
-            await self.check_results(matches)
-            await self.check_status(matches)
-            # save current state
-            self.matches = matches
+            await self.check_results(prev, new)
+            prev = new
             logging.info("matches refreshed")
 
-    async def check_results(self, matches: List[CurrentMatch]) -> None:
-        remains: List[Match] = []
+    async def check_results(
+        self, prev: List[CurrentMatch], new: List[CurrentMatch]
+    ) -> None:
+        """Post results for new matches."""
+        for n in new:
+            found = [p for p in prev if p.match.id == n.match.id]
+            if not found:
+                logging.info(f"match: {n.versus_str()}: finished")
+                msg = self.format_message(n)
+                self.discord.post_message(msg)
 
-        for waiting in self.waitingscores:
-            done = False
-            for match in matches:
-                if waiting.id == match.match.id:
-                    done = self.get_match_results(match)
-            if done is False:
-                remains.append(waiting)
-
-        logging.info(f"remaining {len(remains)} matches scores.")
-        self.waitingscores = remains
-
-    def get_match_results(self, match: CurrentMatch) -> bool:
-        # ensure we have score for all players
-        for pl in match.match.players:
-            if pl.won is None:
-                logging.error("scores are not set yet")
-                return False
-
-        logging.info("we received the scores")
-        msg = self.msg_result(match)
-        self.discord.post_message(msg)
-        return True
-
-    async def check_status(self, matches: List[CurrentMatch]) -> None:
-        for new in matches:
-            prev = None
-            for old in self.matches:
-                if new.match.id == old.match.id:
-                    prev = old
-
-            # is the match finished ?
-            if (
-                prev
-                and prev.match.finished is None
-                and new.match.finished is not None
-            ):
-                logging.info(f"ongoing match finished: {new.match.id}")
-                self.waitingscores.append(new.match)
-
-            # is the match just started ?
-            elif prev is None:
-                logging.info(f"new match started: {new.match.id}")
-
-    def msg_result(self, match: CurrentMatch) -> dict:
+    def format_message(self, match: CurrentMatch) -> dict:
+        """Format Discord message."""
         title = ""
         desc = ""
         color = 7506394  # blue
@@ -230,10 +203,11 @@ class Notifier:
             }]
         }
 
-    async def get_lastmatches(self, all: bool) -> Optional[List[CurrentMatch]]:
+    async def get_lastmatches(self) -> Optional[List[CurrentMatch]]:
+        """Get last matches and removes ongoing matches from the list."""
         current = []
 
-        matches = await self.cli.get_lastmatches(self.players, all)
+        matches = await self.cli.get_lastmatches(self.players)
         if matches is None:
             return None
 
@@ -241,7 +215,7 @@ class Notifier:
             teams = self.set_teams(match.players)
             current.append(CurrentMatch(match=match, teams=teams))
 
-        return current
+        return self.filter_matches(current)
 
     def set_teams(self, players: List[Player]) -> List[Team]:
         teams: list[Team] = []
@@ -266,6 +240,19 @@ class Notifier:
                 ))
 
         return teams
+
+    @staticmethod
+    def match_finished(match: CurrentMatch) -> bool:
+        # ensure we have score for all players
+        for pl in match.match.players:
+            if pl.won is None:
+                logging.error(f"match: {match.versus_str()}: still ongoing")
+                return False
+        return True
+
+    def filter_matches(self, matches: List[CurrentMatch]) -> List[CurrentMatch]:
+        """Removes ongoing matches from list."""
+        return [m for m in matches if self.match_finished(m) is True]
 
 
 async def main(config_file: str) -> None:
