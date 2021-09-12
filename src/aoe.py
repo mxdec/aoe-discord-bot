@@ -203,8 +203,9 @@ class WSClient:
         if pms is None:
             return None
 
+        # keep last 5 matches for each player
         for pm in pms:
-            matches.append(pm.matches[0])
+            matches += pm.matches[:5]
 
         # remove duplicates
         for match in matches:
