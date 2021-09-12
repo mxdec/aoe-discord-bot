@@ -228,7 +228,7 @@ class Notifier:
             # find player's team
             found = False
             for team in teams:
-                if team.number == player.team:
+                if player.team > -1 and team.number == player.team:
                     team.players.append(player)
                     found = True
 
