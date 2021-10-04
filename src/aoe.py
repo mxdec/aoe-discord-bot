@@ -18,6 +18,7 @@ class Player:
     avatarmedium: Optional[str] = None
     civ: Optional[int] = None
     civName: Optional[str] = None
+    civAlpha: Optional[int] = None
     color: Optional[int] = None
     countryCode: Optional[str] = None
     name: Optional[str] = None
@@ -191,8 +192,9 @@ class WSClient:
         return pms
 
     async def get_lastmatches(
-        self, players: List[Player], all: bool
+        self, players: List[Player]
     ) -> Optional[List[Match]]:
+        """Gather last finished match for each player."""
         matches: List[Match] = []
         dedups: List[Match] = []
 
@@ -201,11 +203,9 @@ class WSClient:
         if pms is None:
             return None
 
+        # keep last 5 matches for each player
         for pm in pms:
-            if all is True:
-                matches += pm.matches
-            else:
-                matches.append(pm.matches[0])
+            matches += pm.matches[:5]
 
         # remove duplicates
         for match in matches:
