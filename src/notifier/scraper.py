@@ -1,25 +1,13 @@
 # Standard Library
-import asyncio
 import logging
 import time
-from argparse import ArgumentParser
 from dataclasses import dataclass
 from typing import List, Optional
 
-# Third Party
-import desert
 import requests
-import yaml
-from aoe import WSClient, Match, Player
 
-
-@dataclass
-class Config:
-    """The config file."""
-
-    aoe_ws: str
-    discord_hook: str
-    players: List[Player]
+# Third Party
+from notifier.ws import WSClient, Match, Player
 
 
 @dataclass
@@ -136,13 +124,13 @@ class Notifier:
                 # format title and color according to the result
                 if win is True:
                     logging.info("the clan is victorious")
-                    header += (
-                        f" {'are' if len(teammates) > 1 else 'is'} victorious."
-                    )
+                    verb = 'are' if len(teammates) > 1 else 'is'
+                    header += f" {verb} victorious."
                     color = 5089895  # green
                 else:
                     logging.info("the clan has been defeated")
-                    header += f" {'have' if len(teammates) > 1 else 'has'} been defeated."
+                    verb = 'have' if len(teammates) > 1 else 'has'
+                    header += f" {verb} been defeated."
                     color = 10961731  # red
             else:
                 logging.info("this was an internal match")
@@ -250,38 +238,9 @@ class Notifier:
                 return False
         return True
 
-    def filter_matches(self, matches: List[CurrentMatch]) -> List[CurrentMatch]:
+    def filter_matches(
+        self,
+        matches: List[CurrentMatch],
+    ) -> List[CurrentMatch]:
         """Removes ongoing matches from list."""
         return [m for m in matches if self.match_finished(m) is True]
-
-
-async def main(config_file: str) -> None:
-    logging.info(f"loading config file {config_file}")
-    try:
-        with open(config_file, "r") as stream:
-            data = yaml.safe_load(stream)
-            config = desert.schema(Config).load(data)
-
-            cli = WSClient(url=config.aoe_ws)
-            dsc = Discord(url=config.discord_hook)
-            notifier = Notifier(cli, dsc, config.players)
-
-            # run the infinite loop
-            logging.info("starting AoE Notifier...")
-            await notifier.run()
-            logging.info("exiting...")
-
-    except Exception as exc:
-        logging.error(exc)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    # parse arguments
-    parser = ArgumentParser()
-    parser.add_argument("--config-file", type=str, help="Path to config file.")
-    args = parser.parse_args()
-
-    # start
-    asyncio.run(main(args.config_file))
