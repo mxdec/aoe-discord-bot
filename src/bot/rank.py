@@ -1,23 +1,26 @@
 # Standard Library
 import logging
-from typing import List
+from typing import Dict, List
 
 # Third Party
 import desert
 import requests
-from discord.ext.commands import Bot
+from discord.ext import commands, tasks
 
 from config.dataclass import Ladder, PlayerRank
 
 
-class RankScraper:
+class LadderClient:
 
     headers = {"Referer": "https://www.aoe2.net/"}
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, page_size: int = 10000) -> None:
         self.url = url
+        self.page_size = page_size
+        # ladder by country, one list per contry code (ex: self.ladder['FR'])
+        self.national: Dict[str, List[PlayerRank]] = {}
 
-    def getRanks(self, start: int, length: int) -> Ladder:
+    def getWorldLadder(self, start: int, length: int) -> Ladder:
         params = {'start': start, "length": length}
         logging.info(f"GET - start: {start}, end: {start + length - 1}")
         resp = requests.get(
@@ -30,49 +33,62 @@ class RankScraper:
         return rank
 
     @staticmethod
-    def filterByCountry(
+    def groupByNation(
+        national: Dict[str, List[PlayerRank]],
         players: List[PlayerRank],
-        code: str
-    ) -> List[PlayerRank]:
-        filtered = []
+    ) -> dict:
         for pl in players:
             if any([pl.steam_id, pl.country_code, pl.rank, pl.rating]) is None:
                 continue
-            if pl.country_code == code:
-                filtered.append(pl)
-                logging.debug(f"{pl.rank}: {pl.country_code} - {pl.name}")
-        return filtered
+            if pl.country_code in national:
+                national[pl.country_code].append(pl)
+            else:
+                national[pl.country_code] = [pl]
+            logging.debug(f"{pl.rank}: {pl.country_code} - {pl.name}")
+        return national
 
-    def refreshRank(self, code: str) -> List[PlayerRank]:
+    def refreshRank(self) -> None:
+        logging.info("starting ladder refresh task")
+        national = {}
         start = 0
-        length = 10000
-        rank = self.getRanks(start, length)
-        total = rank.recordsTotal
-        filtered = self.filterByCountry(rank.data, code)
+        length = self.page_size
+        ladder = self.getWorldLadder(start, length)
+        national = self.groupByNation(national, ladder.data)
+        # total = ladder.recordsTotal
+        total = 10001
         while start < total - length:
             start += length
-            res = self.getRanks(start, length)
-            filtered.extend(self.filterByCountry(res.data, code))
-            rank.data.extend(res.data)
-        for i, pl in enumerate(filtered):
-            logging.debug(f"{i}: {pl.rank} - {pl.name}")
-        return filtered
+            ladder = self.getWorldLadder(start, length)
+            national = self.groupByNation(national, ladder.data)
+        # save refreshed national ranks
+        self.national = national
+        logging.info("ladder refresh task over")
 
 
-class DiscordBot(Bot):
+class LadderCog(commands.Cog):
+    def __init__(self, bot: commands.Bot, ladder: LadderClient):
+        self.bot = bot
+        self.index = 0
+        self.ladder = ladder
+        self.printer.start()
 
-    def __init__(self, command_prefix: str):
-        super().__init__(command_prefix)
+    @commands.command()
+    async def rank(self, ctx):
+        logging.info("received !rank command")
+        try:
+            name = self.ladder.national['FR'][0].name
+            rank = self.ladder.national['FR'][0].rank
+            await ctx.send(f'first french is {name}, ranked {rank}')
+        except Exception as e:
+            logging.error(f"no data: {str(e)}")
+            await ctx.send('no data')
 
-        @self.command(name='test')
-        async def command_test(ctx):
-            print("Hello world !")
-            await ctx.send("Hello world !")
+    @tasks.loop(minutes=1)
+    async def printer(self):
+        self.ladder.refreshRank()
 
-        @self.command(name='rank')
-        async def command_rank(ctx):
-            print("The rank.")
-            await ctx.send("The rank.")
+
+class DiscordBot(commands.Bot):
 
     async def on_ready(self):
-        print(f'{self.user} has connected to Discord.')
+        logging.info(f'{self.user.name} has connected to Discord.')
