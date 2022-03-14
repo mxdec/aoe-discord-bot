@@ -52,14 +52,16 @@ main.py
 ```
 $ cat /etc/aoe/config.yml
 aoe_ws: "wss://aoe2.net/ws"
+aoe_ladder: "https://www.aoe2.net/leaderboard/aoe2de"
 discord_hook: "https://discord.com/api/webhooks/your/token"
+discord_token: "the_token_string"
 players:
 - name: "TheViper"
   steamId: "76561197984749679"
   profileId: 196240
-- name: "Hera"
-  steamId: "76561198449406083"
-  profileId: 199325
+- name: "Sitaux"
+  steamId: "76561198116921964"
+  profileId: 212721
 ```
 
 2. Start the service:

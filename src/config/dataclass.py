@@ -88,6 +88,7 @@ class Config:
 
     players: List[Player]
     aoe_ws: Optional[str] = None
+    aoe_ladder: Optional[str] = None
     discord_hook: Optional[str] = None
     discord_token: Optional[str] = None
 
