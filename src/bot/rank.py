@@ -1,4 +1,5 @@
 # Standard Library
+from dataclasses import dataclass
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -11,7 +12,17 @@ from discord import Embed
 from config.dataclass import Ladder, Player, PlayerRank
 
 
+@dataclass
+class NationsLadder:
+    """Rank by country."""
+
+    world: Ladder
+    # ladder by country (ex: self.nations['FR'])
+    nations: Dict[str, List[PlayerRank]]
+
+
 class LadderClient:
+    """Gather public data from the website."""
 
     headers = {"Referer": "https://www.aoe2.net/"}
 
@@ -24,12 +35,8 @@ class LadderClient:
         self.url = url
         self.members = members
         self.page_size = page_size
-
-        # ladder by country (ex: self.duel_national['FR'])
-        self.team_national: Dict[str, List[PlayerRank]] = {}
-        self.duel_national: Dict[str, List[PlayerRank]] = {}
-        self.members_teamrank: List[Tuple[int, PlayerRank]] = []
-        self.members_duelrank: List[Tuple[int, PlayerRank]] = []
+        self.team_national: NationsLadder = None
+        self.duel_national: NationsLadder = None
 
     def getWorldLadder(self, url: str, start: int, length: int) -> Ladder:
         params = {'start': start, "length": length}
@@ -58,44 +65,25 @@ class LadderClient:
             logging.debug(f"{pl.rank}: {pl.country_code} - {pl.name}")
         return national
 
-    @staticmethod
-    def getMembersRank(
-        members: List[Player],
-        national: Dict[str, List[PlayerRank]],
-    ) -> List[Tuple[int, PlayerRank]]:
-        rank = []
-        for n, p in enumerate(national['FR']):
-            filtered = [m for m in members if m.profileId == p.profile_id]
-            if len(filtered) > 0:
-                rank.append((n + 1, p))
-        return rank
-
-    def refreshLadder(self, url: str) -> Dict[str, List[PlayerRank]]:
+    def refreshLadder(self, url: str) -> NationsLadder:
         logging.info(f"{url}: refreshing ladder")
-        national = {}
+        nations = {}
         start = 0
         length = self.page_size
-        ladder = self.getWorldLadder(url, start, length)
-        national = self.groupByNation(national, ladder.data)
-        total = ladder.recordsTotal
+        world = self.getWorldLadder(url, start, length)
+        nations = self.groupByNation(nations, world.data)
+        total = world.recordsTotal
         while start < total - length:
             start += length
-            ladder = self.getWorldLadder(url, start, length)
-            national = self.groupByNation(national, ladder.data)
+            tmp = self.getWorldLadder(url, start, length)
+            world.data.extend(tmp.data)
+            nations = self.groupByNation(nations, tmp.data)
         logging.info(f"{url}: refreshing over")
-        return national
+        return NationsLadder(world, nations)
 
     def refreshData(self) -> None:
         self.team_national = self.refreshLadder(f"{self.url}/rm-team")
-        self.members_teamrank = self.getMembersRank(
-            self.members,
-            self.team_national,
-        )
         self.duel_national = self.refreshLadder(f"{self.url}/rm-1v1")
-        self.members_duelrank = self.getMembersRank(
-            self.members,
-            self.duel_national,
-        )
 
 
 class LadderCog(commands.Cog):
@@ -132,21 +120,51 @@ class LadderCog(commands.Cog):
                 icon = "third_place"
         return f"`{pos}.`  :{icon}:  `{elo}`  [{name}]({link})"
 
+    @staticmethod
+    def getMembersRank(
+        members: List[Player],
+        national: Dict[str, List[PlayerRank]],
+    ) -> List[Tuple[int, PlayerRank]]:
+        rank = []
+        for n, p in enumerate(national['FR']):
+            filtered = [m for m in members if m.profileId == p.profile_id]
+            if len(filtered) > 0:
+                rank.append((n + 1, p))
+        return rank
+
     @commands.command()
-    async def rank(self, ctx):
-        logging.info("received !rank command")
+    async def rank(
+        self,
+        ctx: commands.context.Context,
+        country: str,
+    ):
+        logging.info(f"received command: !rank {country}")
+        members_teamrank = self.getMembersRank(
+            self.ladder.members,
+            self.ladder.team_national.nations,
+        )
+        members_duelrank = self.getMembersRank(
+            self.ladder.members,
+            self.ladder.duel_national.nations,
+        )
+        code = country.upper()
         try:
-            total_duel = len(self.ladder.duel_national['FR'])
-            total_team = len(self.ladder.team_national['FR'])
-            duel_leader = self.ladder.members_duelrank[0]
-            team_leader = self.ladder.members_teamrank[0]
+            total_players_duel_nation = len(self.ladder.duel_national.nations[code])
+            total_players_duel_world = self.ladder.duel_national.world.recordsTotal
+            total_players_team_nation = len(self.ladder.team_national.nations[code])
+            total_players_team_world = self.ladder.team_national.world.recordsTotal
+            duel_leader = members_duelrank[0]
+            team_leader = members_teamrank[0]
+        except IndexError:
+            duel_leader = (1, PlayerRank())
+            team_leader = (1, PlayerRank())
         except Exception as e:
             logging.error(f"no data: {str(e)}")
             await ctx.send('no data')
             return
 
         emb = Embed(
-            title=":flag_fr:  France Leaderboard",
+            title=f":flag_{country.lower()}:  Leaderboard",
             color=5814783,
         )
         emb.set_thumbnail(
@@ -154,7 +172,10 @@ class LadderCog(commands.Cog):
         )
         emb.add_field(
             name='Duel players',
-            value=f":crossed_swords: {total_duel}",
+            value=(
+                f":flag_{country.lower()}: {total_players_duel_nation}\n"
+                f":earth_africa: {total_players_duel_world}"
+            ),
             inline=True,
         )
         emb.add_field(
@@ -163,7 +184,10 @@ class LadderCog(commands.Cog):
         )
         emb.add_field(
             name='Team players',
-            value=f":crossed_swords: {total_team}",
+            value=(
+                f":flag_{country.lower()}: {total_players_team_nation}\n"
+                f":earth_africa: {total_players_team_world}"
+            ),
             inline=True,
         )
         emb.add_field(
@@ -182,18 +206,18 @@ class LadderCog(commands.Cog):
         )
         duel_national_strings = []
         for n in range(10):
-            s = self.formatRankLine(n, self.ladder.duel_national['FR'][n])
+            s = self.formatRankLine(n, self.ladder.duel_national.nations[code][n])
             duel_national_strings.append(s)
         team_national_strings = []
         for n in range(10):
-            s = self.formatRankLine(n, self.ladder.team_national['FR'][n])
+            s = self.formatRankLine(n, self.ladder.team_national.nations[code][n])
             team_national_strings.append(s)
         duel_members = []
-        for n, mb in self.ladder.members_duelrank:
+        for n, mb in members_duelrank:
             s = self.formatRankLine(n, mb, "beginner")
             duel_members.append(s)
         team_members = []
-        for n, mb in self.ladder.members_teamrank:
+        for n, mb in members_teamrank:
             s = self.formatRankLine(n, mb, "beginner")
             team_members.append(s)
         emb.add_field(
