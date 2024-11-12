@@ -73,6 +73,7 @@ class Engine:
         self.players = pls
 
     def run(self) -> None:
+        """Starts the infinite loop."""
         prev = self.get_lastmatches()
         if prev is None:
             logging.error("could't initialize matches")
@@ -91,13 +92,13 @@ class Engine:
             logging.info("matches refreshed")
 
     def check_results(self, prev: List[TeamMatch], new: List[TeamMatch]) -> None:
-            """Post results for new matches."""
-            for n in new:
-                found = [p for p in prev if p.match.id == n.match.id]
-                if not found:
-                    logging.info(f"new finished match: {n.versus_str()}")
-                    msg = self.format_message(n)
-                    self.discord.post_message(msg)
+        """Post results for new matches."""
+        for n in new:
+            found = [p for p in prev if p.match.id == n.match.id]
+            if not found:
+                logging.info(f"new finished match: {n.versus_str()}")
+                msg = self.format_message(n)
+                self.discord.post_message(msg)
 
     def format_message(self, match: TeamMatch) -> dict:
         """Format Discord message."""
@@ -116,7 +117,7 @@ class Engine:
                 for clan_player in self.players:
                     if mb.profile.id == clan_player.profileId:
                         teammates.append(mb)
-                        if pl.won is True:
+                        if mb.outcome > 0:
                             win = True
 
             # ensure this is not an internal clan match for training

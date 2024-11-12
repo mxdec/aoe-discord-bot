@@ -109,7 +109,7 @@ class WorldsEdgeApiClient:
 
                 parsedMatch = Match(
                     id=match['id'],
-                    mapname=match['id'],
+                    mapname=match['mapname'],
                     matchtype_id=match['matchtype_id'],
                     description=match['description'],
                     startgametime=match['startgametime'],
